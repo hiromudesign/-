@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ライブ配信ログ</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif;
+    background: #f0f2f5;
+    padding: 24px;
+    min-height: 100vh;
+  }
+
+  h1 {
+    text-align: center;
+    color: #1a1a2e;
+    font-size: 1.6rem;
+    margin-bottom: 20px;
+    letter-spacing: 0.05em;
+  }
+
+  .toolbar {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+
+  button {
+    padding: 8px 18px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.88rem;
+    font-family: inherit;
+    transition: background 0.2s;
+  }
+
+  .btn-add    { background: #4f8ef7; color: #fff; }
+  .btn-add:hover { background: #3a7be0; }
+  .btn-del    { background: #f76f6f; color: #fff; }
+  .btn-del:hover { background: #e05555; }
+  .btn-csv    { background: #34c984; color: #fff; }
+  .btn-csv:hover { background: #27b070; }
+  .btn-clear  { background: #aaa; color: #fff; }
+  .btn-clear:hover { background: #888; }
+
+  .table-wrap {
+    overflow-x: auto;
+    border-radius: 10px;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.10);
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    background: #fff;
+    min-width: 780px;
+  }
+
+  thead tr {
+    background: #1a1a2e;
+    color: #fff;
+  }
+
+  thead th {
+    padding: 13px 12px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  tbody tr {
+    border-bottom: 1px solid #e8eaed;
+    transition: background 0.15s;
+  }
+
+  tbody tr:hover { background: #f7f9ff; }
+  tbody tr.selected { background: #e8f0fe; }
+
+  tbody td {
+    padding: 6px 8px;
+    text-align: center;
+  }
+
+  td.td-check { width: 40px; }
+  td.td-num   { width: 44px; color: #999; font-size: 0.82rem; }
+  td.td-date  { width: 148px; }
+  td.td-time  { width: 120px; }
+  td.td-theme { min-width: 200px; }
+  td.td-views { width: 120px; }
+  td.td-note  { min-width: 200px; }
+
+  input[type="date"],
+  select,
+  input[type="number"],
+  input[type="text"] {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid #d0d5dd;
+    border-radius: 5px;
+    font-size: 0.88rem;
+    font-family: inherit;
+    outline: none;
+    transition: border 0.2s;
+    background: #fff;
+  }
+
+  input[type="date"]:focus,
+  select:focus,
+  input[type="number"]:focus,
+  input[type="text"]:focus {
+    border-color: #4f8ef7;
+    box-shadow: 0 0 0 2px rgba(79,142,247,0.18);
+  }
+
+  input[type="number"] { text-align: right; }
+
+  .row-count {
+    text-align: right;
+    font-size: 0.82rem;
+    color: #888;
+    margin-top: 10px;
+  }
+
+  @media (max-width: 600px) {
+    body { padding: 12px; }
+    h1 { font-size: 1.2rem; }
+  }
+</style>
+</head>
+<body>
+
+<h1>📡 ライブ配信ログ</h1>
+
+<div class="toolbar">
+  <button class="btn-add" onclick="addRow()">＋ 行を追加</button>
+  <button class="btn-del" onclick="deleteSelected()">✕ 選択行を削除</button>
+  <button class="btn-csv" onclick="exportCSV()">⬇ CSVダウンロード</button>
+  <button class="btn-clear" onclick="clearAll()">🗑 全クリア</button>
+</div>
+
+<div class="table-wrap">
+  <table id="logTable">
+    <thead>
+      <tr>
+        <th class="td-check"><input type="checkbox" id="checkAll" onclick="toggleAll(this)"></th>
+        <th class="td-num">#</th>
+        <th class="td-date">日付</th>
+        <th class="td-time">時間</th>
+        <th class="td-theme">ライブテーマ</th>
+        <th class="td-views">最高視聴数</th>
+        <th class="td-note">補足</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+<div class="row-count" id="rowCount">0 行</div>
+
+<script>
+const STORAGE_KEY = 'liveLogData_v1';
+
+const TIME_OPTIONS = (() => {
+  const opts = [];
+  for (let h = 0; h < 24; h++) {
+    for (let m of [0, 30]) {
+      const hh = String(h).padStart(2,'0');
+      const mm = String(m).padStart(2,'0');
+      opts.push(`${hh}:${mm}`);
+    }
+  }
+  return opts;
+})();
+
+function makeTimeSelect(val='') {
+  const s = document.createElement('select');
+  const blank = document.createElement('option');
+  blank.value = '';
+  blank.textContent = '-- 選択 --';
+  s.appendChild(blank);
+  TIME_OPTIONS.forEach(t => {
+    const o = document.createElement('option');
+    o.value = t;
+    o.textContent = t;
+    if (t === val) o.selected = true;
+    s.appendChild(o);
+  });
+  s.onchange = saveData;
+  return s;
+}
+
+function addRow(data={}) {
+  const tbody = document.getElementById('tbody');
+  const tr = document.createElement('tr');
+  const rowNum = tbody.rows.length + 1;
+
+  // checkbox
+  const tdChk = document.createElement('td');
+  tdChk.className = 'td-check';
+  const chk = document.createElement('input');
+  chk.type = 'checkbox';
+  chk.onchange = () => { tr.classList.toggle('selected', chk.checked); saveData(); };
+  tdChk.appendChild(chk);
+  tr.appendChild(tdChk);
+
+  // row number
+  const tdNum = document.createElement('td');
+  tdNum.className = 'td-num';
+  tdNum.textContent = rowNum;
+  tr.appendChild(tdNum);
+
+  // date
+  const tdDate = document.createElement('td');
+  tdDate.className = 'td-date';
+  const inDate = document.createElement('input');
+  inDate.type = 'date';
+  inDate.value = data.date || '';
+  inDate.onchange = saveData;
+  tdDate.appendChild(inDate);
+  tr.appendChild(tdDate);
+
+  // time
+  const tdTime = document.createElement('td');
+  tdTime.className = 'td-time';
+  tdTime.appendChild(makeTimeSelect(data.time || ''));
+  tr.appendChild(tdTime);
+
+  // theme
+  const tdTheme = document.createElement('td');
+  tdTheme.className = 'td-theme';
+  const inTheme = document.createElement('input');
+  inTheme.type = 'text';
+  inTheme.placeholder = 'テーマを入力';
+  inTheme.value = data.theme || '';
+  inTheme.oninput = saveData;
+  tdTheme.appendChild(inTheme);
+  tr.appendChild(tdTheme);
+
+  // views
+  const tdViews = document.createElement('td');
+  tdViews.className = 'td-views';
+  const inViews = document.createElement('input');
+  inViews.type = 'number';
+  inViews.min = '0';
+  inViews.placeholder = '0';
+  inViews.value = data.views || '';
+  inViews.oninput = saveData;
+  tdViews.appendChild(inViews);
+  tr.appendChild(tdViews);
+
+  // note
+  const tdNote = document.createElement('td');
+  tdNote.className = 'td-note';
+  const inNote = document.createElement('input');
+  inNote.type = 'text';
+  inNote.placeholder = '補足メモ';
+  inNote.value = data.note || '';
+  inNote.oninput = saveData;
+  tdNote.appendChild(inNote);
+  tr.appendChild(tdNote);
+
+  tbody.appendChild(tr);
+  updateRowCount();
+  saveData();
+}
+
+function deleteSelected() {
+  const rows = [...document.querySelectorAll('#tbody tr')];
+  const toDelete = rows.filter(r => r.querySelector('input[type=checkbox]').checked);
+  if (toDelete.length === 0) { alert('削除する行を選択してください'); return; }
+  if (!confirm(`${toDelete.length} 行を削除しますか？`)) return;
+  toDelete.forEach(r => r.remove());
+  renumberRows();
+  saveData();
+}
+
+function renumberRows() {
+  document.querySelectorAll('#tbody tr').forEach((r, i) => {
+    r.cells[1].textContent = i + 1;
+  });
+  updateRowCount();
+}
+
+function toggleAll(master) {
+  document.querySelectorAll('#tbody input[type=checkbox]').forEach(c => {
+    c.checked = master.checked;
+    c.closest('tr').classList.toggle('selected', master.checked);
+  });
+}
+
+function updateRowCount() {
+  const n = document.getElementById('tbody').rows.length;
+  document.getElementById('rowCount').textContent = `${n} 行`;
+}
+
+function clearAll() {
+  if (!confirm('全データを削除しますか？')) return;
+  document.getElementById('tbody').innerHTML = '';
+  updateRowCount();
+  saveData();
+}
+
+function getTableData() {
+  return [...document.querySelectorAll('#tbody tr')].map(r => ({
+    date:  r.cells[2].querySelector('input').value,
+    time:  r.cells[3].querySelector('select').value,
+    theme: r.cells[4].querySelector('input').value,
+    views: r.cells[5].querySelector('input').value,
+    note:  r.cells[6].querySelector('input').value,
+  }));
+}
+
+function saveData() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(getTableData()));
+}
+
+function loadData() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return;
+  try {
+    const rows = JSON.parse(raw);
+    rows.forEach(d => addRow(d));
+  } catch(e) {}
+}
+
+function exportCSV() {
+  const header = ['日付','時間','ライブテーマ','最高視聴数','補足'];
+  const rows = getTableData().map(d =>
+    [d.date, d.time, d.theme, d.views, d.note].map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')
+  );
+  const bom = '\uFEFF';
+  const csv = bom + [header.join(','), ...rows].join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+  const today = new Date().toISOString().slice(0,10);
+  a.download = `live_log_${today}.csv`;
+  a.click();
+}
+
+// 初期化
+loadData();
+if (document.getElementById('tbody').rows.length === 0) {
+  addRow();
+}
+</script>
+</body>
+</html>
